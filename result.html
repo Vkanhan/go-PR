@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GitHub PRs</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 40px;
+            background-color: #f4f4f4;
+        }
+        h1 {
+            color: #333;
+        }
+        .pr-container {
+            background: white;
+            padding: 15px;
+            border-radius: 8px;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+            margin-bottom: 20px;
+        }
+        .pr-title {
+            font-size: 18px;
+            font-weight: bold;
+        }
+        .pr-link {
+            text-decoration: none;
+            color: #0366d6;
+        }
+        .commit-list {
+            margin-top: 10px;
+            padding-left: 20px;
+        }
+    </style>
+</head>
+<body>
+    <h1>GitHub PRs by {{ .UserName }}</h1>
+
+    {{ if not .PRs }}
+        <p>No pull requests found.</p>
+    {{ else }}
+        {{ range .PRs }}
+            <div class="pr-container">
+                <p class="pr-title">
+                    <a class="pr-link" href="{{ .PR.HTMLURL }}" target="_blank">{{ .PR.Title }}</a>
+                </p>
+                <p><strong>Repository:</strong> {{ .PR.RepoName }}</p>
+                <p><strong>Created At:</strong> {{ .PR.CreatedAt }}</p>
+
+                {{ if not .Commits }}
+                    <p>No commits found for this PR.</p>
+                {{ else }}
+                    <p><strong>Commits:</strong></p>
+                    <ul class="commit-list">
+                        {{ range .Commits }}
+                            <li>{{ .Commit.Message }}</li>
+                        {{ end }}
+                    </ul>
+                {{ end }}
+            </div>
+        {{ end }}
+    {{ end }}
+</body>
+</html>
