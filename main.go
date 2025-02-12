@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/joho/godotenv"
 )
@@ -22,9 +23,10 @@ var (
 type PR struct {
 	Title     string `json:"title"`
 	HTMLURL   string `json:"html_url"`
-	RepoName  string
+	RepoName  string `json:"repo_name,omitempty"`
 	Number    int    `json:"number"`
 	CreatedAt string `json:"created_at"`
+	LogoURL   string `json:"logo_url,omitempty"`
 }
 
 type Commit struct {
@@ -34,7 +36,7 @@ type Commit struct {
 }
 
 type PRDetails struct {
-	PR      PR
+	PR
 	Commits []Commit
 }
 
@@ -44,6 +46,29 @@ func init() {
 	if UserName == "" || Token == "" {
 		log.Fatal("GitHub username or token is missing in the .env file")
 	}
+}
+
+func getPRs() []PR {
+	openPRs := getPRsByQuery("is:open")
+	mergedPRs := getPRsByQuery("is:merged")
+	prs := append(openPRs, mergedPRs...)
+
+	// Cache to avoid duplicate API calls for repos.
+	repoLogos := make(map[string]string)
+	for i, pr := range prs {
+		if logo, ok := repoLogos[pr.RepoName]; ok {
+			prs[i].LogoURL = logo
+		} else {
+			logo, err := getRepoLogo(pr.RepoName)
+			if err != nil {
+				log.Printf("Error fetching logo for repo %s: %v", pr.RepoName, err)
+				logo = "" 
+			}
+			repoLogos[pr.RepoName] = logo
+			prs[i].LogoURL = logo
+		}
+	}
+	return prs
 }
 
 type GitHubPRResponse struct {
@@ -58,41 +83,106 @@ type GitHubPRItem struct {
 	CreatedAt     string `json:"created_at"`
 }
 
-func getPRs() []PR {
-	url := fmt.Sprintf("%s/search/issues?q=author:%s+type:pr&per_page=10", GitHubAPIBase, UserName)
-	resp, err := http.Get(url)
-	if err != nil {
-		log.Printf("Error fetching PRs: %v", err)
-		return nil
-	}
-	defer resp.Body.Close()
+func getPRsByQuery(queryQualifier string) []PR {
+	var prs []PR
+	page := 1
+	perPage := 100 // Maximum allowed per page
 
-	var result GitHubPRResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		log.Printf("Error decoding PR response: %v", err)
-		return nil
-	}
-
-	prs := make([]PR, len(result.Items))
-	for i, item := range result.Items {
-		prs[i] = PR{
-			Title:     item.Title,
-			HTMLURL:   item.HTMLURL,
-			RepoName:  extractRepoName(item.RepositoryURL),
-			Number:    item.Number,
-			CreatedAt: item.CreatedAt,
+	for {
+		// query URL q=author:Githubusername+type:pr+is:open
+		url := fmt.Sprintf("%s/search/issues?q=author:%s+type:pr+%s&sort=created&order=asc&per_page=%d&page=%d",
+			GitHubAPIBase, UserName, queryQualifier, perPage, page)
+			
+		req, err := http.NewRequest("GET", url, nil)
+		if err != nil {
+			log.Fatalf("Error creating request: %v", err)
 		}
+		req.Header.Set("Authorization", "token "+Token)
+		req.Header.Set("Accept", "application/vnd.github.v3+json")
+
+		client := &http.Client{Timeout: 5 * time.Second}
+		resp, err := client.Do(req)
+		if err != nil {
+			log.Fatalf("Error fetching PRs: %v", err)
+		}
+		defer resp.Body.Close()
+
+		var result GitHubPRResponse
+
+		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+			log.Fatalf("Error decoding PR response: %v", err)
+		}
+
+		if len(result.Items) == 0 {
+			break
+		}
+
+		for _, item := range result.Items {
+			prs = append(prs, PR{
+				Title:     item.Title,
+				HTMLURL:   item.HTMLURL,
+				RepoName:  extractRepoName(item.RepositoryURL),
+				Number:    item.Number,
+				CreatedAt: item.CreatedAt,
+			})
+		}
+
+		if len(result.Items) < perPage {
+			break
+		}
+		page++
 	}
 	return prs
 }
 
+// extractRepoName converts the repository URL to an owner/repo format.
 func extractRepoName(repoURL string) string {
 	return strings.TrimPrefix(repoURL, GitHubAPIBase+"/repos/")
 }
 
+func getRepoLogo(repoName string) (string, error) {
+	url := fmt.Sprintf("%s/repos/%s", GitHubAPIBase, repoName)
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Authorization", "token "+Token)
+	req.Header.Set("Accept", "application/vnd.github.v3+json")
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("failed to get repo details, status: %d", resp.StatusCode)
+	}
+
+	var repoDetails struct {
+		Owner struct {
+			AvatarURL string `json:"avatar_url"`
+		} `json:"owner"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&repoDetails); err != nil {
+		return "", err
+	}
+	return repoDetails.Owner.AvatarURL, nil
+}
+
 func getCommits(repo string, prNumber int) []Commit {
 	url := fmt.Sprintf("%s/repos/%s/pulls/%d/commits", GitHubAPIBase, repo, prNumber)
-	resp, err := http.Get(url)
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		log.Printf("Error creating request for commits: %v", err)
+		return nil
+	}
+	req.Header.Set("Authorization", "token "+Token)
+	req.Header.Set("Accept", "application/vnd.github.v3+json")
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Do(req)
 	if err != nil {
 		log.Printf("Error fetching commits for PR #%d in %s: %v", prNumber, repo, err)
 		return nil
@@ -102,38 +192,67 @@ func getCommits(repo string, prNumber int) []Commit {
 	var commits []Commit
 	if err := json.NewDecoder(resp.Body).Decode(&commits); err != nil {
 		log.Printf("Error decoding commits for PR #%d in %s: %v", prNumber, repo, err)
-		return []Commit{}
+		return nil
 	}
-	return commits
+
+	var filtered []Commit
+	for _, commit := range commits {
+		// Filter out merge commits for clear commit message
+		if strings.HasPrefix(commit.Commit.Message, "Merge") {
+			continue
+		}
+
+		// Filter out for clear commit message
+		lines := strings.Split(commit.Commit.Message, "\n")
+		var newLines []string
+		for _, line := range lines {
+			if strings.HasPrefix(strings.TrimSpace(line), "Signed-off-by:") {
+				continue
+			}
+			newLines = append(newLines, line)
+		}
+		commit.Commit.Message = strings.Join(newLines, "\n")
+		filtered = append(filtered, commit)
+	}
+	return filtered
 }
 
 func handler(w http.ResponseWriter, r *http.Request) {
 	prs := getPRs()
 	if len(prs) == 0 {
-		http.Error(w, "No PRs found.", http.StatusNotFound)
+		http.Error(w, "No matching PRs found.", http.StatusNotFound)
 		return
 	}
 
-	details := make([]PRDetails, len(prs))
-	for i, pr := range prs {
-		details[i] = PRDetails{
+	var details []PRDetails
+	for _, pr := range prs {
+		commits := getCommits(pr.RepoName, pr.Number)
+		details = append(details, PRDetails{
 			PR:      pr,
-			Commits: getCommits(pr.RepoName, pr.Number),
-		}
+			Commits: commits,
+		})
 	}
 
 	tmpl, err := template.ParseFiles("result.html")
 	if err != nil {
-		http.Error(w, "Internal server error", http.StatusInternalServerError)
-		log.Printf("Error loading HTML template: %v", err)
+		http.Error(w, "Error loading template", http.StatusInternalServerError)
+		log.Printf("Error loading template: %v", err)
 		return
 	}
 
-	_ = tmpl.Execute(w, map[string]any{"UserName": UserName, "PRs": details})
+	data := struct {
+		PRs []PRDetails
+	}{
+		PRs: details,
+	}
+
+	if err := tmpl.Execute(w, data); err != nil {
+		log.Printf("Error executing template: %v", err)
+	}
 }
 
 func main() {
 	http.HandleFunc("/", handler)
-	fmt.Printf("Server running on http://localhost:8080 as %s\n", UserName)
+	log.Println("Server running on http://localhost:8080")
 	log.Fatal(http.ListenAndServe(":8080", nil))
 }

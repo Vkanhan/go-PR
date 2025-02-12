@@ -1,65 +1,73 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>GitHub PRs</title>
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            margin: 40px;
-            background-color: #f4f4f4;
-        }
-        h1 {
-            color: #333;
-        }
-        .pr-container {
-            background: white;
-            padding: 15px;
-            border-radius: 8px;
-            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
-            margin-bottom: 20px;
-        }
-        .pr-title {
-            font-size: 18px;
-            font-weight: bold;
-        }
-        .pr-link {
-            text-decoration: none;
-            color: #0366d6;
-        }
-        .commit-list {
-            margin-top: 10px;
-            padding-left: 20px;
-        }
-    </style>
+	<meta charset="UTF-8">
+	<title>OSS PRs Summary</title>
+	<style>
+		body {
+			font-family: Arial, sans-serif;
+			margin: 20px;
+			background-color: #f4f4f4;
+		}
+		h1 {
+			color: #333;
+		}
+		.pr {
+			background: #fff;
+			border: 1px solid #ccc;
+			padding: 10px;
+			margin-bottom: 20px;
+			border-radius: 5px;
+			box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+		}
+		.pr h2 {
+			margin-top: 0;
+		}
+		.repo-info {
+			display: flex;
+			align-items: center;
+		}
+		.repo-info img {
+			border-radius: 50%;
+			margin-right: 10px;
+			width: 40px;
+			height: 40px;
+		}
+		.commits {
+			margin-top: 10px;
+		}
+		.commits li {
+			margin-bottom: 5px;
+			/* Preserve newlines */
+			white-space: pre-wrap;
+		}
+	</style>
 </head>
 <body>
-    <h1>GitHub PRs by {{ .UserName }}</h1>
-
-    {{ if not .PRs }}
-        <p>No pull requests found.</p>
-    {{ else }}
-        {{ range .PRs }}
-            <div class="pr-container">
-                <p class="pr-title">
-                    <a class="pr-link" href="{{ .PR.HTMLURL }}" target="_blank">{{ .PR.Title }}</a>
-                </p>
-                <p><strong>Repository:</strong> {{ .PR.RepoName }}</p>
-                <p><strong>Created At:</strong> {{ .PR.CreatedAt }}</p>
-
-                {{ if not .Commits }}
-                    <p>No commits found for this PR.</p>
-                {{ else }}
-                    <p><strong>Commits:</strong></p>
-                    <ul class="commit-list">
-                        {{ range .Commits }}
-                            <li>{{ .Commit.Message }}</li>
-                        {{ end }}
-                    </ul>
-                {{ end }}
-            </div>
-        {{ end }}
-    {{ end }}
+	<h1>Your OSS Open &amp; Merged PRs Summary</h1>
+	{{range .PRs}}
+		<div class="pr">
+			<div class="repo-info">
+				{{if .LogoURL}}
+					<img src="{{.LogoURL}}" alt="Repo Logo">
+				{{end}}
+				<h2><a href="{{.HTMLURL}}">{{.Title}}</a></h2>
+			</div>
+			<p><strong>Repo:</strong> {{.RepoName}}</p>
+			<p><strong>Created:</strong> {{.CreatedAt}}</p>
+			{{if .Commits}}
+				<div class="commits">
+					<h3>Commits:</h3>
+					<ul>
+						{{range .Commits}}
+							<li>{{.Commit.Message}}</li>
+						{{end}}
+					</ul>
+				</div>
+			{{else}}
+				<p>No commits found for this PR.</p>
+			{{end}}
+		</div>
+	{{end}}
 </body>
 </html>
